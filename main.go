@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/bogevold/task-mgr/internal/handler"
 	"github.com/bogevold/task-mgr/internal/task"
 )
 
@@ -19,12 +21,8 @@ func main() {
 		}
 	}
 
-	tasks, err := store.GetAll()
-	if err != nil {
-		fmt.Printf("Kunne ikke hente oppgaver: %v", err)
-	}
-	for _, task := range tasks {
-		fmt.Printf("ID: %d, Title: %s, Done: %v\n", task.ID, task.Title, task.Done)
-	}
-
+	th := handler.NewTaskHandler(store)
+	mux := http.NewServeMux()
+	th.RegisterRoutes(mux)
+	http.ListenAndServe(":8072", mux)
 }
