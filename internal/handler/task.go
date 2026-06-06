@@ -3,6 +3,8 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/bogevold/task-mgr/internal/task"
 )
@@ -25,17 +27,86 @@ func (h *TaskHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(tasks)
 }
 
-// func (h *TaskHandler) handleSave(w http.ResponseWriter, r *http.Request) {
-// 	// les task fra r, lagre, skriv svar til w
-// 	newTask
-// 	json.NewDecoder(r.Body).Decode(newTask)
-// 	savedTask, err := h.store.Save(newTask)
-// 	if err != nil {
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 	}
-// 	json.NewEncoder(w).Encode(savedTask)
-// }
+func (h *TaskHandler) handleGetById(w http.ResponseWriter, r *http.Request) {
+	str_id := r.PathValue("id")
+
+	id, err := strconv.ParseUint(str_id, 10, 64)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	task, err := h.store.Get(uint(id))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(task)
+}
+
+func (h *TaskHandler) handleSave(w http.ResponseWriter, r *http.Request) {
+	// les task fra r, lagre, skriv svar til w
+	var newTask task.Task
+	err := json.NewDecoder(r.Body).Decode(&newTask)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	newTask.CreatedAt = time.Now()
+	savedTask, err := h.store.Save(newTask)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(savedTask)
+}
+
+func (h *TaskHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
+	str_id := r.PathValue("id")
+
+	id, err := strconv.ParseUint(str_id, 10, 64)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	err = h.store.Delete(uint(id))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *TaskHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	str_id := r.PathValue("id")
+	id, err := strconv.ParseUint(str_id, 10, 64)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var task2Update task.Task
+	err = json.NewDecoder(r.Body).Decode(&task2Update)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	task2Update.ID = uint(id)
+	updatedTask, err := h.store.Update(task2Update)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updatedTask)
+}
 
 func (h *TaskHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/tasks", h.handleGetAll)
+	mux.HandleFunc("GET /tasks", h.handleGetAll)
+	mux.HandleFunc("GET /tasks/{id}", h.handleGetById)
+	mux.HandleFunc("POST /tasks", h.handleSave)
+	mux.HandleFunc("DELETE /tasks/{id}", h.handleDelete)
+	mux.HandleFunc("PUT /tasks/{id}", h.handleUpdate)
 }
