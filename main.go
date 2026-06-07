@@ -3,14 +3,21 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/bogevold/task-mgr/internal/handler"
+	pgstore "github.com/bogevold/task-mgr/internal/store"
 	"github.com/bogevold/task-mgr/internal/task"
 )
 
 func main() {
-	store := task.NewInMemoryStore()
+	connStr := os.Getenv("DATABASE_URL")
+	store, err := pgstore.NewPostgresStore(connStr)
+	if err != nil {
+		fmt.Printf("Kunne ikke initialisere postgres backend: %v", err)
+		return
+	}
 	title := ""
 	for i := range 4 {
 		title = fmt.Sprintf("Task %d", i)

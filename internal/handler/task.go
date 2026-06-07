@@ -13,6 +13,13 @@ type TaskHandler struct {
 	store task.TaskStore
 }
 
+type UpdateTaskRequest struct {
+	ID        *uint      `json:"id"`
+	Title     *string    `json:"title"`
+	Done      *bool      `json:"done"`
+	CreatedAt *time.Time `json:"created_at"`
+}
+
 func NewTaskHandler(store task.TaskStore) *TaskHandler {
 	return &TaskHandler{store: store}
 }
@@ -86,13 +93,28 @@ func (h *TaskHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var task2Update task.Task
-	err = json.NewDecoder(r.Body).Decode(&task2Update)
+
+	task2Update, err := h.store.Get(uint(id))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var reqTask UpdateTaskRequest
+	err = json.NewDecoder(r.Body).Decode(&reqTask)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	task2Update.ID = uint(id)
+
+	if reqTask.Title != nil {
+		task2Update.Title = *reqTask.Title
+	}
+
+	if reqTask.Done != nil {
+		task2Update.Done = *reqTask.Done
+	}
+
 	updatedTask, err := h.store.Update(task2Update)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -108,5 +130,5 @@ func (h *TaskHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tasks/{id}", h.handleGetById)
 	mux.HandleFunc("POST /tasks", h.handleSave)
 	mux.HandleFunc("DELETE /tasks/{id}", h.handleDelete)
-	mux.HandleFunc("PUT /tasks/{id}", h.handleUpdate)
+	mux.HandleFunc("PATCH /tasks/{id}", h.handleUpdate)
 }
