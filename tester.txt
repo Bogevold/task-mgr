@@ -3,6 +3,15 @@ export DATABASE_URL="postgres://taskuser:taskpass@localhost:5432/taskdb?sslmode=
 go run main.go  # postgres
 STORE=memory go run main.go  # memory
 
+docker compose up -d # Starter alt i detached mode
+docker compose down
+
+# Legge på database 
+migrate -path migrations -database "postgres://taskuser:taskpass@localhost:5432/taskdb?sslmode=disable" up
+
+# Fjerne database
+migrate -path migrations -database "postgres://taskuser:taskpass@localhost:5432/taskdb?sslmode=disable" down
+
 
  curl localhost:8072/tasks
  curl localhost:8072/tasks|jq .
