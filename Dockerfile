@@ -7,7 +7,7 @@ COPY . .
 RUN go build -o task-mgr .
 
 # Steg 2 - kjør
-FROM alpine:3.21
+FROM alpine:3.22
 WORKDIR /app
 COPY --from=builder /app/task-mgr .
 CMD ["./task-mgr"]
