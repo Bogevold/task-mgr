@@ -11,25 +11,43 @@ import (
 	"github.com/bogevold/task-mgr/internal/task"
 )
 
-func main() {
-	connStr := os.Getenv("DATABASE_URL")
-	store, err := pgstore.NewPostgresStore(connStr)
-	if err != nil {
-		fmt.Printf("Kunne ikke initialisere postgres backend: %v", err)
-		return
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
 	}
-	title := ""
-	for i := range 4 {
-		title = fmt.Sprintf("Task %d", i)
-		var tsk = task.Task{Title: title, CreatedAt: time.Now()}
-		_, err := store.Save(tsk)
-		if err != nil {
-			fmt.Printf("forventet ingen feil, fikk: %v", err)
+	return value
+}
+
+func main() {
+	storeType := os.Getenv("STORE")
+	var store task.TaskStore
+	var err error
+	switch storeType {
+	case "memory":
+		fmt.Println("Startet i debug modus med in memory database")
+		store = task.NewInMemoryStore()
+		for i := range 4 {
+			_, err := store.Save(task.Task{Title: fmt.Sprintf("Task %d", i), CreatedAt: time.Now()})
+			if err != nil {
+				fmt.Printf("forventet ingen feil, fikk: %v", err)
+			}
 		}
+	default:
+		fmt.Println("Startet i standard modus med in PostgreSQL database")
+		connStr := os.Getenv("DATABASE_URL")
+		store, err = pgstore.NewPostgresStore(connStr)
+		if err != nil {
+			fmt.Printf("Kunne ikke initialisere postgres backend: %v", err)
+			return
+		} // bruk PostgresStore
+
 	}
 
 	th := handler.NewTaskHandler(store)
 	mux := http.NewServeMux()
 	th.RegisterRoutes(mux)
-	http.ListenAndServe(":8072", mux)
+	port := getEnv("PORT", "8072")
+	fmt.Printf("Server lytter på :%s\n", port)
+	http.ListenAndServe(fmt.Sprintf(":%s", port), mux)
 }

@@ -1,3 +1,9 @@
+export DATABASE_URL="postgres://taskuser:taskpass@localhost:5432/taskdb?sslmode=disable"
+
+go run main.go  # postgres
+STORE=memory go run main.go  # memory
+
+
  curl localhost:8072/tasks
  curl localhost:8072/tasks|jq .
  curl -X POST localhost:8072/tasks -H "Content-Type: application/json" -d '{"title": "min nye task 2"}'
@@ -5,5 +11,5 @@
  curl -s localhost:8072/tasks/3|jq .
  curl -X POST localhost:8072/tasks -H "Content-Type: application/json" -d '{"title": "min nye task"}'
  curl -X DELETE localhost:8072/tasks/0
- curl -X PUT localhost:8072/tasks/1 -H "Content-Type: application/json" -d '{"title": "endret"}'
+ curl -X PATCH localhost:8072/tasks/1 -H "Content-Type: application/json" -d '{"title": "endret"}'
  curl -s localhost:8072/tasks|jq .
