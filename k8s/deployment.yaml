@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-mgr
+  namespace: task-mgr
+  labels:
+    app: task-mgr
+spec:
+  replicas: 2 # Apper kan trygt skaleres opp i flere kopier (pods)
+  selector:
+    matchLabels:
+      app: task-mgr
+  template:
+    metadata:
+      labels:
+        app: task-mgr
+    spec:
+      # 1. INIT-CONTAINERS:
+      #    a) Vent til Postgres er klar før appen starter
+      initContainers:
+        - name: vent-pa-postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: task-mgr-secret
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U $(POSTGRES_USER); do
+                echo "Venter på at Postgres skal bli klar..."
+                sleep 2
+              done
+              echo "Postgres er klar! Starter applikasjonen."
+        #    b) installer migrasjoner
+        - name: kjor-migrasjoner
+          image: homelab:30500/task-mgr-migrate:latest
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_PASSWORD
+                  name: task-mgr-secret
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: task-mgr-secret
+          command:
+            - sh
+            - -c
+            - migrate -path /migrations -database "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/taskdb?sslmode=disable" up
+      # 2. APP-CONTAINER: Selve applikasjonen din
+      containers:
+        - name: app
+          image: homelab:30500/task-mgr:latest # <-- Erstatt med ditt eget app-bilde
+          ports:
+            - containerPort: 8072 # Porten appen din lytter på internt
+          # Miljøvariabler appen din trenger for å koble til databasen
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: task-mgr-secret
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_PASSWORD
+                  name: task-mgr-secret
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/taskdb?sslmode=disable"
+
+          # Helsesjekker for selve appen din
+          # readinessProbe:
+          #   httpGet:
+          #     path: /healthz  # Endre til en endepunkt i appen din som returnerer 200 OK
+          #     port: 8080
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          # livenessProbe:
+          #   httpGet:
+          #     path: /healthz
+          #     port: 8080
+          #   initialDelaySeconds: 15
+          #   periodSeconds: 20

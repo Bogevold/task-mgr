@@ -1,3 +1,4 @@
 # .gitignore
 task-manager    # det kompilerte binærfilen
 *.env
+k8s/secret.yaml
