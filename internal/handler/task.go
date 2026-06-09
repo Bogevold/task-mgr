@@ -125,10 +125,23 @@ func (h *TaskHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(updatedTask)
 }
 
+func (h *TaskHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	err := h.store.Ping()
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error"})
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 func (h *TaskHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tasks", h.handleGetAll)
 	mux.HandleFunc("GET /tasks/{id}", h.handleGetById)
 	mux.HandleFunc("POST /tasks", h.handleSave)
 	mux.HandleFunc("DELETE /tasks/{id}", h.handleDelete)
 	mux.HandleFunc("PATCH /tasks/{id}", h.handleUpdate)
+	mux.HandleFunc("GET /healthz", h.handleHealth)
 }

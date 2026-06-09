@@ -61,3 +61,7 @@ func (s *InMemoryStore) GetAll() ([]Task, error) {
 	}
 	return list, nil
 }
+
+func (s *InMemoryStore) Ping() error {
+	return nil
+}

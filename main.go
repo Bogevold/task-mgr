@@ -49,5 +49,8 @@ func main() {
 	th.RegisterRoutes(mux)
 	port := getEnv("PORT", "8072")
 	fmt.Printf("Server lytter på :%s\n", port)
-	http.ListenAndServe(fmt.Sprintf(":%s", port), mux)
+	//http.ListenAndServe(fmt.Sprintf(":%s", port), mux)
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), mux); err != nil {
+		fmt.Printf("Server feilet: %v\n", err)
+	}
 }

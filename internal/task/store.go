@@ -6,4 +6,5 @@ type TaskStore interface {
 	GetAll() ([]Task, error)
 	Update(task Task) (Task, error)
 	Delete(id uint) error
+	Ping() error
 }

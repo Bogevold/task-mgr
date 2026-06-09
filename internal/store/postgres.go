@@ -84,3 +84,7 @@ func (p *PostgresStore) Update(inTask task.Task) (task.Task, error) {
 	}
 	return inTask, nil
 }
+
+func (p *PostgresStore) Ping() error {
+	return p.db.Ping()
+}

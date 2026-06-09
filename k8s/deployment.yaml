@@ -73,17 +73,15 @@ spec:
                   name: task-mgr-secret
             - name: DATABASE_URL
               value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/taskdb?sslmode=disable"
-
-          # Helsesjekker for selve appen din
-          # readinessProbe:
-          #   httpGet:
-          #     path: /healthz  # Endre til en endepunkt i appen din som returnerer 200 OK
-          #     port: 8080
-          #   initialDelaySeconds: 5
-          #   periodSeconds: 10
-          # livenessProbe:
-          #   httpGet:
-          #     path: /healthz
-          #     port: 8080
-          #   initialDelaySeconds: 15
-          #   periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz # Endepunkt i appen din som returnerer 200 OK
+              port: 8072
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8072
+            initialDelaySeconds: 15
+            periodSeconds: 20
