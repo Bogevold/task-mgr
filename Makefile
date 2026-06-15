@@ -132,16 +132,22 @@ push-migrate: build-migrate
 
 # ── Deploy ────────────────────────────────────────────────────
 deploy:
+	#@echo "$(CYAN)Deployer til k3s...$(RESET)"
+	#kubectl apply -f k8s/
+	#@echo "$(GREEN)Ferdig$(RESET)"
 	@echo "$(CYAN)Deployer til k3s...$(RESET)"
-	kubectl apply -f k8s/
-	@echo "$(GREEN)Ferdig$(RESET)"
+	helm upgrade --install $(APP) helm/ \
+		--namespace $(NAMESPACE) \
+		--create-namespace \
+		--set image.tag=$(IMAGE_TAG)
+	@echo "$(GREEN)Ferdig$(RESET)"	
 
 rollout:
 	@echo "$(CYAN)Restarter deployment...$(RESET)"
 	kubectl rollout restart deployment/$(APP) -n $(NAMESPACE)
 	kubectl rollout status deployment/$(APP) -n $(NAMESPACE)
 
-ship: push push-migrate deploy rollout
+ship: push push-migrate deploy
 	@echo "$(GREEN)Ship fullført — $(IMAGE_TAG) kjører i k3s$(RESET)"
 
 # ── Utvikling ─────────────────────────────────────────────────

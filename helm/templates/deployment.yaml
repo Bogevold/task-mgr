@@ -1,0 +1,89 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ include "app.fullname" . }}
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "app.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "app.fullname" . }}
+    spec:
+      # 1. INIT-CONTAINERS:
+      #    a) Vent til Postgres er klar før appen starter
+      initContainers:
+        - name: vent-pa-postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: {{ include "app.secretName" . }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p {{.Values.postgres.port}} -U $(POSTGRES_USER); do
+                echo "Venter på at Postgres skal bli klar..."
+                sleep 2
+              done
+              echo "Postgres er klar! Starter applikasjonen."
+        #    b) installer migrasjoner
+        - name: kjor-migrasjoner
+          image: {{ printf "%s/%s-migrate:%s" .Values.registry (include "app.name" .) .Values.image.tag  }} # homelab:30500/task-mgr-migrate:latest
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_PASSWORD
+                  name: {{ include "app.secretName" . }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: {{ include "app.secretName" . }}
+          command:
+            - sh
+            - -c
+            - migrate -path /migrations -database "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:{{.Values.postgres.port}}/{{ .Values.postgres.database }}?sslmode=disable" up
+      # 2. APP-CONTAINER: Selve applikasjonen din
+      containers:
+        - name: app
+          #image: homelab:30500/task-mgr:latest # <-- Erstatt med ditt eget app-bilde
+          image: {{ printf "%s/%s:%s" .Values.registry (include "app.name" .) .Values.image.tag }}
+          ports:
+            - containerPort: {{.Values.app.port}} # Porten appen din lytter på internt
+          # Miljøvariabler appen din trenger for å koble til databasen
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: {{ include "app.secretName" . }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_PASSWORD
+                  name: {{ include "app.secretName" . }}
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:{{.Values.postgres.port}}/{{.Values.postgres.database}}?sslmode=disable"
+          readinessProbe:
+            httpGet:
+              path: /healthz # Endepunkt i appen din som returnerer 200 OK
+              port: {{.Values.app.port}}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{.Values.app.port}}
+            initialDelaySeconds: 15
+            periodSeconds: 20

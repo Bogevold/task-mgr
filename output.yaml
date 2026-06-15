@@ -1,0 +1,232 @@
+---
+# Source: task-mgr/templates/postgres/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: task-mgr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Source: task-mgr/templates/postgres/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: task-mgr
+  labels:
+    app: postgres
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres
+  type: ClusterIP
+---
+# Source: task-mgr/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+name: task-mgr-service #task-mgr-service
+namespace: task-mgr
+spec:
+  ports:
+    - port: 80
+      targetPort: 8072 # Videresender webtrafikk fra port 80 til appens port 8080
+  selector:
+    app: task-mgr
+  type: ClusterIP # Bruk ClusterIP internt, eller ClusterIP + Ingress for ekstern trafikk
+---
+# Source: task-mgr/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-mgr
+  namespace: task-mgr
+  labels:
+    app: task-mgr
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: task-mgr
+  template:
+    metadata:
+      labels:
+        app: task-mgr
+    spec:
+      # 1. INIT-CONTAINERS:
+      #    a) Vent til Postgres er klar før appen starter
+      initContainers:
+        - name: vent-pa-postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: task-mgr-secret
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U $(POSTGRES_USER); do
+                echo "Venter på at Postgres skal bli klar..."
+                sleep 2
+              done
+              echo "Postgres er klar! Starter applikasjonen."
+        #    b) installer migrasjoner
+        - name: kjor-migrasjoner
+          image: homelab:30500/task-mgr-migrate:v0.0.1 # homelab:30500/task-mgr-migrate:latest
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_PASSWORD
+                  name: task-mgr-secret
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: task-mgr-secret
+          command:
+            - sh
+            - -c
+            - migrate -path /migrations -database "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/taskdb?sslmode=disable" up
+      # 2. APP-CONTAINER: Selve applikasjonen din
+      containers:
+        - name: app
+          #image: homelab:30500/task-mgr:latest # <-- Erstatt med ditt eget app-bilde
+          image: homelab:30500/task-mgr:v0.0.1
+          ports:
+            - containerPort: 8072 # Porten appen din lytter på internt
+          # Miljøvariabler appen din trenger for å koble til databasen
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: task-mgr-secret
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_PASSWORD
+                  name: task-mgr-secret
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/taskdb?sslmode=disable"
+          readinessProbe:
+            httpGet:
+              path: /healthz # Endepunkt i appen din som returnerer 200 OK
+              port: 8072
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8072
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+# Source: task-mgr/templates/postgres/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: task-mgr
+  labels:
+    app: postgres
+spec:
+  serviceName: "postgres"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_USER
+                  name: task-mgr-secret
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: POSTGRES_PASSWORD
+                  name: task-mgr-secret
+            - name: POSTGRES_DB
+              value: "taskdb"
+          ports:
+            - containerPort: 5432
+              name: postgres
+
+          # Koble mappen på innsiden av containeren til ditt volum
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres-db-data # Unngår problemer med "lost+found"-mapper i k3s
+
+          # Helsesjekker i Kubernetes (tilsvarer docker-compose healthcheck)
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "taskdb"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "taskdb"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+
+      # Definer koblingen til din eksisterende PVC her
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+---
+# Source: task-mgr/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  #name: task-mgr-ingress
+  name: task-mgr-ingress
+  namespace: task-mgr
+  annotations:
+    # traefik.ingress.kubernetes.io/router.middlewares: task-mgr-strip-task-mgr-api@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: task-mgr-strip-task-mgr-api@kubernetescrd
+spec:
+  rules:
+    - host: homelab
+      http:
+        paths:
+          - path: /task-mgr-api
+            pathType: Prefix
+            backend:
+              service:
+                name: task-mgr-service
+                port:
+                  number: 80
+---
+# Source: task-mgr/templates/middleware.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-task-mgr-api
+  namespace: task-mgr
+spec:
+  stripPrefix:
+    prefixes:
+      - /task-mgr-api
