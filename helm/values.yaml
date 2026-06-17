@@ -3,6 +3,10 @@ registry: homelab:30500
 app:
   port: 8072
   replicas: 2
+  env:
+    jwksurl: "https://gitlab.skead.no/-/jwks"
+    jwtaud: "https://onboarding-flyt.skead.no"
+    alwdns: "lagring" # Kan være flere da kommaseparert
 
 postgres:
   database: taskdb

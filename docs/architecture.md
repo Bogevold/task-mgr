@@ -9,6 +9,11 @@ HTTP-request
      │
      ▼
 ┌─────────────┐
+│    Auth     │  JWT-validering for skriveoperasjoner
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
 │   Handler   │  Mottar HTTP, parser request, skriver response
 └──────┬──────┘
        │ task.Task
@@ -26,6 +31,19 @@ Store     Store
 
 ## Pakkestruktur
 
+### `internal/auth`
+
+JWT-autentisering via GitLab ID tokens. Verifiserer token-signatur mot GitLab sitt JWKS-endepunkt og sjekker at `namespace_path` er i listen over tillatte grupper.
+
+`jwt.go` — `Auth`-struct med `RequireJWT`-middleware:
+```go
+type Config struct {
+    JWKSUrl           string
+    Audience          string
+    AllowedNamespaces []string
+}
+```
+
 ### `internal/task`
 
 Kjernen i applikasjonen. Inneholder domenemodellen og kontrakten for lagring.
@@ -40,8 +58,7 @@ type Task struct {
 }
 ```
 
-`store.go` — `TaskStore`-interfacet som definerer hva en lagringsenhet må kunne gjøre.
-Alle implementasjoner må oppfylle denne kontrakten.
+`store.go` — `TaskStore`-interfacet som definerer hva en lagringsenhet må kunne gjøre, inkludert `Ping()` for helsesjekk.
 
 `memory.go` — In-memory implementasjon med `map[uint]Task`. Brukes til utvikling og testing (`STORE=memory`).
 
@@ -52,16 +69,16 @@ Kommuniserer med databasen via parameteriserte SQL-spørringer for å unngå SQL
 
 ### `internal/handler`
 
-HTTP-laget. `TaskHandler` tar imot en `TaskStore` via konstruktøren — den bryr seg ikke om det er Postgres eller in-memory bak.
-
-`RegisterRoutes` kobler HTTP-metode og URL til riktig handler-funksjon:
+HTTP-laget. `TaskHandler` tar imot en `TaskStore` via konstruktøren.
+`RegisterRoutes` tar også imot en `*auth.Auth` for å beskytte skriveoperasjoner.
 
 ```
-GET    /tasks        → handleGetAll
-POST   /tasks        → handleSave
-GET    /tasks/{id}   → handleGetById
-PATCH  /tasks/{id}   → handleUpdate
-DELETE /tasks/{id}   → handleDelete
+GET    /tasks        → handleGetAll      (åpen)
+POST   /tasks        → handleSave        (krever JWT)
+GET    /tasks/{id}   → handleGetById     (åpen)
+PATCH  /tasks/{id}   → handleUpdate      (krever JWT)
+DELETE /tasks/{id}   → handleDelete      (krever JWT)
+GET    /healthz      → handleHealth      (åpen — brukes av k8s probes)
 ```
 
 ## Viktige designvalg
@@ -71,30 +88,29 @@ DELETE /tasks/{id}   → handleDelete
 `TaskStore`-interfacet gjør at HTTP-laget er fullstendig uavhengig av lagringsimplementasjonen.
 Å bytte fra in-memory til PostgreSQL krevde null endringer i `handler`-pakken — bare `main.go` endres.
 
+### JWT som middleware
+
+`RequireJWT` wrapper handler-funksjoner uten å endre dem. Dette holder autentiseringslogikken
+adskilt fra forretningslogikken og gjør det enkelt å beskytte nye endepunkter.
+
 ### PATCH fremfor PUT
 
 `handleUpdate` bruker PATCH og `UpdateTaskRequest` med peker-felt (`*string`, `*bool`).
 Dette gir tre tilstander per felt: ikke sendt (`nil`), sendt tom, eller sendt med verdi.
-PUT ville krevd at klienten sender alle felt og ville nullstilt utelatte felt.
-
-### Feilhåndtering
-
-Go returnerer feil som verdier, ikke exceptions. Alle feil håndteres eksplisitt med `if err != nil`.
-HTTP-laget mapper feil til passende statuskoder: `400 Bad Request` for klientfeil, `500 Internal Server Error` for serverfeil.
 
 ### Konfigurasjon via miljøvariabler
 
-All konfigurasjon (`DATABASE_URL`, `PORT`, `STORE`) leses fra miljøvariabler.
-Dette gjør applikasjonen portabel — samme binary kjøres lokalt, i Docker og i Kubernetes
-uten kodeendringer.
+All konfigurasjon leses fra miljøvariabler. Dette gjør applikasjonen portabel — samme binary
+kjøres lokalt, i Docker og i Kubernetes uten kodeendringer.
 
-## Dataflyt — POST /tasks
+## Dataflyt — POST /tasks (autentisert)
 
 ```
-1. Klient sender POST /tasks med JSON-body
-2. handleSave leser og dekoder JSON til UpdateTaskRequest
-3. CreatedAt settes av serveren (ikke klienten)
-4. store.Save() lagrer i PostgreSQL med RETURNING
-5. Lagret task (med tildelt ID) serialiseres til JSON
-6. Klient mottar 201 Created med task-objektet
+1. Klient sender POST /tasks med JWT i Authorization-header
+2. RequireJWT henter og verifiserer JWT mot JWKS-endepunkt
+3. namespace_path sjekkes mot AllowedNamespaces
+4. handleSave leser og dekoder JSON til Task
+5. CreatedAt settes av serveren
+6. store.Save() lagrer i PostgreSQL med RETURNING
+7. Klient mottar 201 Created med task-objektet
 ```

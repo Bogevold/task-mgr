@@ -75,6 +75,12 @@ spec:
                   name: {{ include "app.secretName" . }}
             - name: DATABASE_URL
               value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:{{.Values.postgres.port}}/{{.Values.postgres.database}}?sslmode=disable"
+            - name: JWKS_URL
+              value: {{ .Values.app.env.jwksurl | quote }}
+            - name: JWT_AUDIENCE
+              value: {{ .Values.app.env.jwtaud | quote }}
+            - name: ALLOWED_NAMESPACES
+              value: {{ .Values.app.env.alwdns | quote }}
           readinessProbe:
             httpGet:
               path: /healthz # Endepunkt i appen din som returnerer 200 OK

@@ -70,13 +70,15 @@ docker build -t task-mgr .
 docker build -f Dockerfile.migrate -t task-mgr-migrate .
 
 # Tag for lokalt registry
-docker tag task-mgr homelab:30500/task-mgr:latest
-docker tag task-mgr-migrate homelab:30500/task-mgr-migrate:latest
+docker tag task-mgr homelab:30500/task-mgr:v0.0.1
+docker tag task-mgr-migrate homelab:30500/task-mgr-migrate:v0.0.1
 
 # Push til registry
-docker push homelab:30500/task-mgr:latest
-docker push homelab:30500/task-mgr-migrate:latest
+docker push homelab:30500/task-mgr:v0.0.1
+docker push homelab:30500/task-mgr-migrate:v0.0.1
 ```
+
+Bruk alltid versjonerte tags istedenfor `latest` i produksjon.
 
 ## Miljøvariabler
 
@@ -85,6 +87,9 @@ docker push homelab:30500/task-mgr-migrate:latest
 | `DATABASE_URL` | PostgreSQL tilkoblingsstreng |
 | `PORT` | Porten appen lytter på (standard: 8072) |
 | `STORE` | `postgres` eller `memory` |
+| `JWKS_URL` | URL til JWKS-endepunkt |
+| `JWT_AUDIENCE` | Forventet audience i JWT |
+| `ALLOWED_NAMESPACES` | Kommaseparert liste over tillatte GitLab-grupper |
 
 ### Kjøre med in-memory store (debug)
 

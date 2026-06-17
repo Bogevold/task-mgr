@@ -12,6 +12,13 @@ go run main.go                    # Kjør direkte
 STORE=memory go run main.go       # Kjør med in-memory store
 PORT=9000 go run main.go          # Kjør på annen port
 
+# Kjør med JWT-autentisering (lokal mock)
+JWKS_URL=http://localhost:8080/.well-known/jwks.json \
+JWT_AUDIENCE=min-app-test \
+ALLOWED_NAMESPACES=lagring \
+STORE=memory \
+go run main.go
+
 # Test
 go test ./...                     # Kjør alle tester
 go test -v ./...                  # Verbose output
@@ -73,6 +80,66 @@ docker exec -it task-mgr-db-1 psql -U taskuser -d taskdb
 docker exec -it task-mgr-app-1 sh
 ```
 
+## Makefile
+
+```bash
+make help                         # Se alle tilgjengelige kommandoer
+make version                      # Vis versjon, branch og image-tag
+
+# Versjonering
+make bump-patch                   # Bump patch (v0.0.x)
+make bump-minor                   # Bump minor (v0.x.0)
+make bump-major                   # Bump major (vx.0.0)
+
+# Branching
+make branch-fix NAME=beskrivelse      # Bump patch og lag fix/beskrivelse
+make branch-feature NAME=beskrivelse  # Bump minor og lag feature/beskrivelse
+make branch-major NAME=beskrivelse    # Bump major og lag major/beskrivelse
+
+# Bygg og deploy
+make build                        # Bygg app Docker-image
+make build-migrate                # Bygg migrate Docker-image
+make push                         # Push app-image til registry
+make push-migrate                 # Push migrate-image til registry
+make deploy                       # Deploy til k3s med Helm
+make ship                         # Bygg, push og deploy i én kommando
+
+# Utvikling
+make up                           # Start docker-compose
+make down                         # Stopp docker-compose
+make migrate                      # Kjør migrasjoner lokalt
+make test                         # Kjør alle tester
+make vet                          # Kjør go vet
+make clean                        # Slett kompilerte filer
+```
+
+## Helm
+
+```bash
+# Se hva som vil deployes
+helm template task-mgr helm/ \
+  --namespace task-mgr \
+  --set image.tag=v0.0.1
+
+# Deploy
+helm upgrade --install task-mgr helm/ \
+  --namespace task-mgr \
+  --create-namespace \
+  --set image.tag=v0.0.1
+
+# Se installerte releases
+helm list -n task-mgr
+
+# Se historikk
+helm history task-mgr -n task-mgr
+
+# Rulle tilbake
+helm rollback task-mgr -n task-mgr
+
+# Slett release
+helm uninstall task-mgr -n task-mgr
+```
+
 ## kubectl
 
 ```bash
@@ -80,11 +147,6 @@ docker exec -it task-mgr-app-1 sh
 kubectl get all -n task-mgr                           # Se alle ressurser
 kubectl get pods -n task-mgr                          # Se pods
 kubectl get pods -n task-mgr -w                       # Watch pods (live)
-
-# Deploy
-kubectl apply -f k8s/                                 # Apply alle manifester
-kubectl apply -f k8s/deployment.yaml                  # Apply én fil
-kubectl delete -f k8s/                                # Slett alle ressurser
 
 # Feilsøking
 kubectl describe pod -n task-mgr <pod-navn>           # Detaljer om pod
@@ -103,10 +165,6 @@ kubectl exec -it -n task-mgr postgres-0 -- psql -U taskuser -d taskdb
 kubectl rollout restart deployment/task-mgr -n task-mgr
 kubectl rollout status deployment/task-mgr -n task-mgr
 kubectl rollout history deployment/task-mgr -n task-mgr
-
-# Namespace
-kubectl get all -n task-mgr                           # Alt i namespace
-kubectl delete namespace task-mgr                     # Slett alt (forsiktig!)
 ```
 
 ## git (oh-my-zsh aliases)
@@ -135,39 +193,59 @@ test:     legge til eller endre tester
 chore:    vedlikehold, avhengighetsoppdateringer
 ```
 
-Eksempler:
+## Lokal JWT-testing
+
 ```bash
-gcam "feat: REST API med alle CRUD endepunkter"
-gcam "fix: håndter feil ved ugyldig task ID"
-gcam "docs: legg til API-dokumentasjon"
-gcam "refactor: flytt UpdateTaskRequest til handler-pakken"
+# Start mock JWKS-server (i egen terminal)
+go run ./testdata/mock-jwks/
+
+# Generer token
+TOKEN=$(go run ./testdata/gen-token/)
+
+# Test beskyttet endepunkt
+curl -s -X POST localhost:8072/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title": "test"}' | jq .
+
+# Test at åpent endepunkt ikke krever token
+curl -s localhost:8072/tasks | jq .
+
+# Test at manglende token gir 401
+curl -si -X POST localhost:8072/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title": "test"}'
 ```
 
 ## curl (API-testing)
 
 ```bash
-# Lokalt
-BASE=localhost:8072
-
-# k3s
-BASE=<domene>/task-mgr-api
+# Sett base URL
+BASE=localhost:8072          # lokalt
+BASE=homelab/task-mgr-api    # k3s
 
 # Hent alle
 curl -s $BASE/tasks | jq .
 
-# Opprett
+# Opprett (krever token)
 curl -s -X POST $BASE/tasks \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"title": "min task"}' | jq .
 
 # Hent én
 curl -s $BASE/tasks/1 | jq .
 
-# Oppdater
+# Oppdater (krever token)
 curl -s -X PATCH $BASE/tasks/1 \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"done": true}' | jq .
 
-# Slett
-curl -s -X DELETE $BASE/tasks/1
+# Slett (krever token)
+curl -s -X DELETE $BASE/tasks/1 \
+  -H "Authorization: Bearer $TOKEN"
+
+# Helsesjekk
+curl -s $BASE/healthz | jq .
 ```

@@ -1,85 +1,86 @@
 # Kubernetes / k3s
 
-## Oversikt over manifester
+## Oversikt over ressurser
+
+Applikasjonen deployes via Helm. Helm genererer disse Kubernetes-ressursene:
 
 ```
-k8s/
-  namespace.yaml        # Isolerer alle ressurser under task-mgr
-  secret.yaml           # Sensitive verdier (ikke i git!)
-  secrets.example.yaml  # Eksempel med dummy-verdier (i git)
-  configmap.yaml        # Ikke-sensitiv konfigurasjon
-  pg-pvc.yaml           # Persistent lagring for PostgreSQL
-  pg-deployment.yaml    # PostgreSQL StatefulSet
-  pg-service.yaml       # Eksponerer PostgreSQL internt i clusteret
-  deployment.yaml       # App Deployment med init-containere
-  service.yaml          # Eksponerer appen internt i clusteret
-  middleware.yaml        # Traefik strip-prefix middleware
-  ingress.yaml          # Eksponerer appen eksternt via Traefik
+Namespace: task-mgr
+  Deployment: task-mgr         (2 replikaer)
+    InitContainer: vent-pa-postgres
+    InitContainer: kjor-migrasjoner
+    Container: app
+  Service: task-mgr-service    (ClusterIP, port 80→8072)
+  Ingress: task-mgr-ingress    (Traefik, /task-mgr-api)
+  Middleware: strip-task-mgr-api (Traefik strip-prefix)
+  StatefulSet: postgres        (1 replika)
+  Service: postgres            (ClusterIP, port 5432)
+  PersistentVolumeClaim: postgres-pvc (1Gi)
 ```
 
-## Deploy fra scratch
+Secrets opprettes manuelt utenfor Helm:
+```
+Secret: task-mgr-secret        (POSTGRES_USER, POSTGRES_PASSWORD)
+```
 
-Kjør i denne rekkefølgen:
+## Første deploy
 
 ```bash
-kubectl apply -f k8s/namespace.yaml
+# Opprett namespace og secret
+kubectl create namespace task-mgr
 kubectl apply -f k8s/secret.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/pg-pvc.yaml
-kubectl apply -f k8s/pg-deployment.yaml
-kubectl apply -f k8s/pg-service.yaml
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
-kubectl apply -f k8s/middleware.yaml
-kubectl apply -f k8s/ingress.yaml
+
+# Deploy med Helm
+helm upgrade --install task-mgr helm/ \
+  --namespace task-mgr \
+  --create-namespace \
+  --set image.tag=v0.0.1
 ```
 
-Eller alle på én gang (rekkefølgen styres av Kubernetes selv):
+## Oppdatere applikasjonen
 
 ```bash
-kubectl apply -f k8s/
+# Via Makefile (anbefalt)
+make ship
+
+# Manuelt
+docker build -t homelab:30500/task-mgr:v0.1.0 .
+docker push homelab:30500/task-mgr:v0.1.0
+helm upgrade task-mgr helm/ \
+  --namespace task-mgr \
+  --set image.tag=v0.1.0
 ```
 
-## Ressurser forklart
+## Init-containere
 
-### Namespace
+Deployment har to init-containere som kjører i rekkefølge før app-containeren starter:
 
-Isolerer alle task-mgr ressurser fra andre applikasjoner i clusteret.
-Gjør det enkelt å slette alt på én gang: `kubectl delete namespace task-mgr`.
+`vent-pa-postgres` — poller `pg_isready` til PostgreSQL svarer. Forhindrer at appen
+starter før databasen er klar.
 
-### Secret
+`kjor-migrasjoner` — kjører `migrate up` mot databasen. Sikrer at skjemaet alltid
+er oppdatert før appen starter. Kjøres én gang per pod-oppstart.
 
-Inneholder `POSTGRES_USER` og `POSTGRES_PASSWORD`.
-`secret.yaml` skal aldri committes til git — legg den i `.gitignore`.
-Bruk `secrets.example.yaml` som mal.
+## Health checks
 
-### StatefulSet (PostgreSQL)
+`readinessProbe` — sjekker `/healthz` hvert 10. sekund. Hvis den feiler fjernes
+poden fra load balanceren inntil databasen er tilgjengelig igjen.
 
-`StatefulSet` fremfor `Deployment` for PostgreSQL fordi:
-- Stabil nettverksidentitet (podnavnet endres ikke ved restart)
-- Garantert rekkefølge ved oppstart og nedstengning
-- Viktig for databaser som forventer stabil identitet
+`livenessProbe` — sjekker `/healthz` hvert 20. sekund. Hvis den feiler 3 ganger
+på rad restarter Kubernetes poden.
 
-### PersistentVolumeClaim
+## Traefik Ingress
 
-Reserverer 1GB diskplass fra k3s sin lokale storage.
+Eksponerer appen på `http://homelab/task-mgr-api`.
+`Middleware` stripper `/task-mgr-api`-prefikset før requesten når appen.
+
+## PersistentVolumeClaim
+
+`postgres-pvc` reserverer 1GB diskplass fra k3s sin lokale storage.
 Data overlever pod-restart og redeployments.
 `subPath: postgres-db-data` unngår problemer med `lost+found`-mapper i k3s.
 
-### Deployment (App)
-
-Kjører 2 replikaer for redundans. Inneholder to init-containere:
-
-1. `vent-pa-postgres` — poller `pg_isready` til PostgreSQL svarer
-2. `kjor-migrasjoner` — kjører `migrate up` mot databasen
-
-App-containeren starter ikke før begge init-containere er fullført.
-
-### Traefik Ingress
-
-Eksponerer appen på `http://<domene>/task-mgr-api`.
-`Middleware` stripper `/task-mgr-api`-prefikset før requesten når appen,
-slik at appen ikke trenger å vite noe om URL-strukturen utenfra.
+Sletter du PVC-en mister du alle data — vær forsiktig med `kubectl delete pvc`.
 
 ## Feilsøking
 
@@ -87,13 +88,16 @@ slik at appen ikke trenger å vite noe om URL-strukturen utenfra.
 # Se status på alle ressurser
 kubectl get all -n task-mgr
 
+# Se pods
+kubectl get pods -n task-mgr -w
+
 # Beskriv en pod (se events og konfigurasjon)
 kubectl describe pod -n task-mgr <pod-navn>
 
-# Se logger fra en container
+# Se logger fra app-container
 kubectl logs -n task-mgr <pod-navn>
 
-# Se logger fra en init-container
+# Se logger fra init-containere
 kubectl logs -n task-mgr <pod-navn> -c vent-pa-postgres
 kubectl logs -n task-mgr <pod-navn> -c kjor-migrasjoner
 
@@ -102,18 +106,10 @@ kubectl port-forward -n task-mgr service/task-mgr-service 8080:80
 
 # Koble til PostgreSQL-poden direkte
 kubectl exec -it -n task-mgr postgres-0 -- psql -U taskuser -d taskdb
-```
 
-## Oppdatere applikasjonen
+# Se Helm-historikk
+helm history task-mgr -n task-mgr
 
-```bash
-# Bygg og push nytt image
-docker build -t homelab:30500/task-mgr:latest .
-docker push homelab:30500/task-mgr:latest
-
-# Tving Kubernetes til å hente nytt image
-kubectl rollout restart deployment/task-mgr -n task-mgr
-
-# Følg rollout-status
-kubectl rollout status deployment/task-mgr -n task-mgr
+# Rulle tilbake
+helm rollback task-mgr -n task-mgr
 ```

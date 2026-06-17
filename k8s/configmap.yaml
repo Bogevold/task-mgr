@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: task-mgr-config
-  namespace: task-mgr
-data:
-  PORT: "8072"

@@ -1,7 +1,17 @@
 # API Dokumentasjon
 
 Base URL lokalt: `http://localhost:8072`
-Base URL k3s: `http://<domene>/task-mgr-api`
+Base URL k3s: `http://homelab/task-mgr-api`
+
+## Autentisering
+
+Skriveoperasjoner krever et gyldig GitLab ID token i `Authorization`-headeren:
+
+```
+Authorization: Bearer <token>
+```
+
+Se [Autentisering](auth.md) for detaljer.
 
 ## Endepunkter
 
@@ -10,6 +20,8 @@ Base URL k3s: `http://<domene>/task-mgr-api`
 ```
 GET /tasks
 ```
+
+Åpent endepunkt — krever ikke autentisering.
 
 **Response 200 OK**
 ```json
@@ -31,6 +43,7 @@ Tom liste returneres som `[]`, ikke `null`.
 
 ```
 POST /tasks
+Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
@@ -61,6 +74,8 @@ Content-Type: application/json
 GET /tasks/{id}
 ```
 
+Åpent endepunkt — krever ikke autentisering.
+
 **Response 200 OK**
 ```json
 {
@@ -71,14 +86,13 @@ GET /tasks/{id}
 }
 ```
 
-**Response 500** hvis ID ikke finnes.
-
 ---
 
 ### Oppdater task (delvis)
 
 ```
 PATCH /tasks/{id}
+Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
@@ -94,14 +108,6 @@ Sender bare feltene som skal endres. Utelatte felt beholdes uendret.
 **Request body — marker som ferdig**
 ```json
 {
-  "done": true
-}
-```
-
-**Request body — endre begge**
-```json
-{
-  "title": "Ny tittel",
   "done": true
 }
 ```
@@ -122,43 +128,40 @@ Sender bare feltene som skal endres. Utelatte felt beholdes uendret.
 
 ```
 DELETE /tasks/{id}
+Authorization: Bearer <token>
 ```
 
 **Response 204 No Content** — ingen body ved suksess.
 
 ---
 
-## Feilresponser
+### Helsesjekk
 
-Alle feil returneres som plain text med passende HTTP-statuskode.
+```
+GET /healthz
+```
 
-| Statuskode | Betydning |
-|------------|-----------|
-| 400 Bad Request | Ugyldig JSON i request body |
-| 204 No Content | Slett suksess |
-| 500 Internal Server Error | Serverfeil eller ID ikke funnet |
+Åpent endepunkt — brukes av Kubernetes readiness og liveness probes.
+
+**Response 200 OK**
+```json
+{"status": "ok"}
+```
+
+**Response 503 Service Unavailable** — databasen er ikke tilgjengelig.
+```json
+{"status": "error"}
+```
 
 ---
 
-## curl-eksempler
+## Feilresponser
 
-```bash
-# Hent alle
-curl -s localhost:8072/tasks | jq .
-
-# Opprett
-curl -s -X POST localhost:8072/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": "min task"}' | jq .
-
-# Hent én
-curl -s localhost:8072/tasks/1 | jq .
-
-# Oppdater
-curl -s -X PATCH localhost:8072/tasks/1 \
-  -H "Content-Type: application/json" \
-  -d '{"done": true}' | jq .
-
-# Slett
-curl -s -X DELETE localhost:8072/tasks/1
-```
+| Statuskode | Betydning |
+|------------|-----------|
+| 400 Bad Request | Ugyldig JSON eller manglende/ugyldig token |
+| 401 Unauthorized | Manglende token |
+| 403 Forbidden | Gyldig token men ikke tillatt namespace |
+| 204 No Content | Slett suksess |
+| 500 Internal Server Error | Serverfeil eller ID ikke funnet |
+| 503 Service Unavailable | Database utilgjengelig |
