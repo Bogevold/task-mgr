@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/bogevold/task-mgr/internal/auth"
 	"github.com/bogevold/task-mgr/internal/handler"
 	pgstore "github.com/bogevold/task-mgr/internal/store"
 	"github.com/bogevold/task-mgr/internal/task"
@@ -44,9 +46,18 @@ func main() {
 
 	}
 
+	// Lese JWKS_URL, JWT_AUDIENCE og ALLOWED_NAMESPACES fra miljøvariabler
+	jwksUrl := os.Getenv("JWKS_URL")
+	jwtAud := os.Getenv("JWT_AUDIENCE")
+	alwdNs := strings.Split(os.Getenv("ALLOWED_NAMESPACES"), ",")
+	// Opprette en auth.Config
+	// Opprette en auth.Auth med auth.NewAuth
+	newAuth := auth.NewAuth(auth.Config{JWKSUrl: jwksUrl, Audience: jwtAud, AllowedNamespaces: alwdNs})
+	// Sende den inn i RegisterRoutes
+
 	th := handler.NewTaskHandler(store)
 	mux := http.NewServeMux()
-	th.RegisterRoutes(mux)
+	th.RegisterRoutes(mux, newAuth)
 	port := getEnv("PORT", "8072")
 	fmt.Printf("Server lytter på :%s\n", port)
 	//http.ListenAndServe(fmt.Sprintf(":%s", port), mux)

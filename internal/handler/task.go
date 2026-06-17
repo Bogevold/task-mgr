@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bogevold/task-mgr/internal/auth"
 	"github.com/bogevold/task-mgr/internal/task"
 )
 
@@ -137,11 +138,13 @@ func (h *TaskHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-func (h *TaskHandler) RegisterRoutes(mux *http.ServeMux) {
+func (h *TaskHandler) RegisterRoutes(mux *http.ServeMux, a *auth.Auth) {
+	// Åpne endepunkter kan kalles uten autentisering
 	mux.HandleFunc("GET /tasks", h.handleGetAll)
 	mux.HandleFunc("GET /tasks/{id}", h.handleGetById)
-	mux.HandleFunc("POST /tasks", h.handleSave)
-	mux.HandleFunc("DELETE /tasks/{id}", h.handleDelete)
-	mux.HandleFunc("PATCH /tasks/{id}", h.handleUpdate)
 	mux.HandleFunc("GET /healthz", h.handleHealth)
+	// Beskyttede endepunkter, her å det autentiseres
+	mux.HandleFunc("POST /tasks", a.RequireJWT(h.handleSave))
+	mux.HandleFunc("DELETE /tasks/{id}", a.RequireJWT(h.handleDelete))
+	mux.HandleFunc("PATCH /tasks/{id}", a.RequireJWT(h.handleUpdate))
 }
